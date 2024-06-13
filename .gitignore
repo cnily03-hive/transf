@@ -1,0 +1,6 @@
+received/
+build/
+
+*.exe
+*.o
+*.a
