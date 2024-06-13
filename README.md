@@ -16,3 +16,9 @@ The chunk for file transpotation is 1024 bytes, you can modify the `CHUNK_SIZE` 
 > `CHUNK_SIZE` has to be modified in both files at the same time.
 
 Moreover, `SOCKET_SND_TIMEOUT` and `SOCKET_RCV_TIMEOUT` is available to modify in [udp_server.cpp](./udp_server.cpp) and [udp_client.cpp](./udp_client.cpp), to set the timeout of the socket, in milliseconds.
+
+## License
+
+Copyright (c) Cnily03. All rights reserved.
+
+Licensed under the [MIT](./LICENSE) License.
