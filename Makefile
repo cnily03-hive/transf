@@ -1,4 +1,4 @@
-CXX = g++
+CXX = clang++
 
 INCLUDES = -I./include -I./src
 

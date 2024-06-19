@@ -1,0 +1,23 @@
+name: Compile
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    name: Compile
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          msystem: mingw64
+          install: mingw-w64-x86_64-llvm
+      - name: Compile source code
+        run: |
+          echo "::group::Clang++ version"
+          clang++ --version
+          echo "::endgroup::"
+          echo "::group::Compiling"
+          make
+          echo "::endgroup::"

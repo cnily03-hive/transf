@@ -6,7 +6,9 @@ This repository Implemented file transfer via UDP protocol, with security check 
 
 ## Development
 
-Windows platform is needed if you want to compile the code.
+The compile environment is MinGW, posix thread, C++ 20 standard on Windows OS. Please make sure you have Windows Kits on your computer.
+
+If you meet problems when compiling, give a try to [LLVM MinGW](https://github.com/mstorsjo/llvm-mingw/releases).
 
 To change the directory to save(default is `./received`), you can modify the `SAVE_PATH` in [udp_server.cpp](./udp_server.cpp).
 
