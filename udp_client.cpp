@@ -7,9 +7,11 @@
 #include <iostream>
 #include <string>
 
-#define TITLE_INFO "\033[0;34m[INFO]\033[0m "
-#define TITLE_ERROR "\033[0;31m[ERROR]\033[0m "
-
+// wingdi.h has defined `ERROR` macro, which is conflicting with enum `Level::ERROR`
+#ifdef ERROR
+#undef ERROR
+#endif
+#include "logger.h"
 #include "utils.h"
 
 #define ANSI_DELLINE "\033[F\033[K"
@@ -25,6 +27,8 @@
 
 #define SOCKET_SND_TIMEOUT 10000
 #define SOCKET_RCV_TIMEOUT 5000
+
+Logger logger("UDP Client");
 
 bool is_ipv6(const std::string& ip) {
     struct sockaddr_in6 sa;
@@ -66,7 +70,7 @@ std::string trim(const std::string& str) {
 
 int main(int argc, char* argv[]) {
     if (argc != 3) {
-        logger::print("Usage: udp_client <ip> <port>");
+        logger.print("Usage: udp_client <ip> <port>");
         return 0;
     }
 
@@ -79,7 +83,7 @@ int main(int argc, char* argv[]) {
     WSAData wsData;
     int ws_ok = WSAStartup(MAKEWORD(2, 2), &wsData);
     if (ws_ok != 0) {
-        logger::error("WSAStartup");
+        logger.error("WSAStartup");
         return 0;
     }
 
@@ -88,7 +92,7 @@ int main(int argc, char* argv[]) {
     SOCKET s_out = socket(FAMILY, SOCK_DGRAM, IPPROTO_UDP);
     if (s_out == INVALID_SOCKET) {
         int err = WSAGetLastError();
-        logger::error("Failed to create socket (code: ", err, ")");
+        logger.error("Failed to create socket (code: ", err, ")");
         return 0;
     }
 
@@ -98,7 +102,7 @@ int main(int argc, char* argv[]) {
     int opt_ok_2 =
         setsockopt(s_out, SOL_SOCKET, SO_RCVTIMEO, (const char*)&RCV_TIMEOUT, sizeof(RCV_TIMEOUT));
     if (opt_ok_1 == SOCKET_ERROR || opt_ok_2 == SOCKET_ERROR) {
-        logger::error("Failed to set socket options");
+        logger.error("Failed to set socket options");
         return 0;
     }
 
@@ -109,7 +113,7 @@ int main(int argc, char* argv[]) {
     int bind_ok = FAMILY == AF_INET ? bind_ipv4(s_out, &server4, ip_address.c_str(), PORT)
                                     : bind_ipv6(s_out, &server6, ip_address.c_str(), PORT);
     if (bind_ok != 1) {
-        logger::error("Failed to bind ip and port");
+        logger.error("Failed to bind ip and port");
         return 0;
     }
     sockaddr* server = FAMILY == AF_INET ? (sockaddr*)&server4 : (sockaddr*)&server6;
@@ -121,24 +125,24 @@ int main(int argc, char* argv[]) {
     char hello_rcv[16];
     if (SOCKET_ERROR ==
         sendto(s_out, msg_hello.c_str(), msg_hello.size(), 0, server, server_size)) {
-        logger::error("Cannot connect to server");
+        logger.error("Cannot connect to server");
         return 0;
     }
     if (SOCKET_ERROR == recvfrom(s_out, hello_rcv, 7, 0, server, &server_size)) {
-        logger::error("Cannot connect to server");
+        logger.error("Cannot connect to server");
         return 0;
     }
     if (strncmp(hello_rcv, msg_ret.c_str(), msg_ret.size()) != 0) {
-        logger::error("Server responsed an unexpected message");
+        logger.error("Server responsed an unexpected message");
         return 0;
     }
-    logger::info("Connection established");
+    logger.info("Connection established");
 
     bool exit = false;
-    logger::print(ANSI_CYAN_L, "Type a file path to send, or type '@exit' to exit", ANSI_RESET);
+    logger.print(ANSI_CYAN_L, "Type a file path to send, or type '@exit' to exit", ANSI_RESET);
     while (!exit) {
         std::string input;
-        logger::instant(ANSI_GRAY_L, "> ", ANSI_RESET);
+        logger.instant(ANSI_GRAY_L, "> ", ANSI_RESET);
         getline(std::cin, input);
         input = trim(input);
 
@@ -151,7 +155,7 @@ int main(int argc, char* argv[]) {
 
             // check if file exists
             if (!file.is_open()) {
-                logger::error("File not found: ", ANSI_GRAY_L, fp, ANSI_RESET);
+                logger.error("File not found: ", ANSI_GRAY_L, fp, ANSI_RESET);
                 continue;
             }
 
@@ -171,7 +175,7 @@ int main(int argc, char* argv[]) {
             // send handshake packet: [filesize, filename]
             if (SOCKET_ERROR ==
                 sendto(s_out, handshake_buf, handshake_size, 0, server, server_size)) {
-                logger::error("Failed to send handshake");
+                logger.error("Failed to send handshake");
                 delete[] handshake_buf;
                 file.close();
                 continue;
@@ -182,19 +186,19 @@ int main(int argc, char* argv[]) {
             char rcv_buf[16];
             int bytes_received = recvfrom(s_out, rcv_buf, 16, 0, server, &server_size);
             if (SOCKET_ERROR == bytes_received) {
-                logger::error("Failed when receiving handshake");
+                logger.error("Failed when receiving handshake");
                 file.close();
                 continue;
             }
 
             // check if handshake is ok
             if (strncmp(rcv_buf, "\u000AREJECT", 7) == 0) {
-                logger::error("The server refused to receive the file");
+                logger.error("The server refused to receive the file");
                 file.close();
                 continue;
             }
             if (strncmp(rcv_buf, "\u000AOK", 3) != 0) {
-                logger::error("Unexpected handshake response");
+                logger.error("Unexpected handshake response");
                 file.close();
                 continue;
             }
@@ -212,36 +216,35 @@ int main(int argc, char* argv[]) {
                 u_long rate = chunk == tot_chunk ? 100 : chunk * 100 / tot_chunk;
                 if (chunk == 1 || chunk == tot_chunk || last_rate != rate) {
                     last_rate = rate;
-                    logger::print(ANSI_DELLINE, fore_str, ANSI_BLUE_D, "   Sending file (", rate,
-                                  "%)", ANSI_RESET);
+                    logger.print(ANSI_DELLINE, fore_str, ANSI_BLUE_D, "   Sending file (", rate,
+                                 "%)", ANSI_RESET);
                 }
 
                 // send file content
                 file.read(buffer, BUFFER_SIZE);
                 int read_size = file.gcount();
                 if (SOCKET_ERROR == sendto(s_out, buffer, read_size, 0, server, server_size)) {
-                    logger::error("Failed to send file content (", chunk, "/", tot_chunk, ")");
+                    logger.error("Failed to send file content (", chunk, "/", tot_chunk, ")");
                     break;
                 }
 
                 // receive status (chunk)
                 bytes_received = recvfrom(s_out, rcv_buf, 16, 0, server, &server_size);
                 if (SOCKET_ERROR == bytes_received) {
-                    logger::error("Failed when receiving status (", chunk, "/", tot_chunk, ")");
+                    logger.error("Failed when receiving status (", chunk, "/", tot_chunk, ")");
                     break;
                 }
 
                 std::string rcv_status_head = "\u000ARECEIVED";
                 if (strncmp(rcv_buf, rcv_status_head.c_str(), rcv_status_head.size()) != 0) {
-                    logger::error("Unexpected receive status (", chunk, "/", tot_chunk, ")");
+                    logger.error("Unexpected receive status (", chunk, "/", tot_chunk, ")");
                 }
 
                 u_long chunk_rcv = 0;
                 memcpy(&chunk_rcv, rcv_buf + rcv_status_head.size(), sizeof(chunk_rcv));
                 chunk_rcv = ntohl(chunk_rcv);
                 if (chunk_rcv != chunk) {
-                    logger::error("Chunk mismatch (", chunk, " expected, ", chunk_rcv,
-                                  " received)");
+                    logger.error("Chunk mismatch (", chunk, " expected, ", chunk_rcv, " received)");
                     break;
                 }
             }
@@ -251,28 +254,28 @@ int main(int argc, char* argv[]) {
             // receive status (done)
             bytes_received = recvfrom(s_out, rcv_buf, 16, 0, server, &server_size);
             if (SOCKET_ERROR == bytes_received) {
-                logger::error("Failed when receiving status (done)");
+                logger.error("Failed when receiving status (done)");
                 continue;
             }
 
             if (strncmp(rcv_buf, "\u000ADONE", 5) != 0) {
-                logger::error("Unexpected receive status (done)");
+                logger.error("Unexpected receive status (done)");
                 continue;
             }
 
-            logger::print(ANSI_DELLINE, fore_str, ANSI_GREEN_D, "   (Sent)", ANSI_RESET);
+            logger.print(ANSI_DELLINE, fore_str, ANSI_GREEN_D, "   (Sent)", ANSI_RESET);
 
         } else if (input.size() > 0 && input.starts_with("@")) {
             if (input == "@exit" || input == "@quit" || input == "@q") {
                 exit = true;
             } else if (input == "@about") {
-                logger::print("UDP Client v1.0.0");
-                logger::print("Copytight (c) 2024 by Cnily03");
-                logger::print("Licensed under the MIT License");
+                logger.print("UDP Client v1.0.0");
+                logger.print("Copytight (c) 2024 by Cnily03");
+                logger.print("Licensed under the MIT License");
             } else if (input == "@") {
-                logger::info("Empty command");
+                logger.info("Empty command");
             } else {
-                logger::error("Unkown command: ", input.substr(1));
+                logger.error("Unkown command: ", input.substr(1));
             }
         }
     }

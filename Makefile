@@ -63,4 +63,4 @@ $(BUILD_DIR):
 clean:
 	rm -rf $(BUILD_DIR) $(CLIENT_TARGET) $(SERVER_TARGET)
 
-.PHONY: all clean
+.PHONY: all clean client server

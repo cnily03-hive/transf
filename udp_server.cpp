@@ -1,5 +1,4 @@
 #include <WS2tcpip.h>
-#include <Winsock2.h>
 #include <winsock2.h>
 #include <ws2ipdef.h>
 
@@ -8,15 +7,13 @@
 #include <string>
 #include <thread>
 
-#define TITLE_INFO "\033[0;96m[INFO]\033[0m "
-#define TITLE_ERROR "\033[0;31m[ERROR]\033[0m "
-
-#include "utils.h"
+// wingdi.h has defined `ERROR` macro, which is conflicting with enum `Level::ERROR`
+#ifdef ERROR
+#undef ERROR
+#endif
+#include "logger.h"
 
 #define ANSI_DELLINE "\033[F\033[K"
-#define ANSI_GREEN_L "\033[0;92m"
-#define ANSI_MAGENTA_L "\033[0;95m"
-#define ANSI_RESET "\033[0m"
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -25,6 +22,8 @@
 
 #define SOCKET_SND_TIMEOUT 10000
 #define SOCKET_RCV_TIMEOUT 5000
+
+Logger logger("UDP Server");
 
 int bind_ipv4(SOCKET& s, const int port) {
     sockaddr_in ipv4_hint;
@@ -79,7 +78,7 @@ SOCKET create_socket(const int& port, int family) {
     SOCKET s = socket(family, SOCK_DGRAM, IPPROTO_UDP);
     if (s == INVALID_SOCKET) {
         int err = WSAGetLastError();
-        logger::error("Failed to create socket (code: ", err, ")");
+        logger.error("Failed to create socket (code: ", err, ")");
         return INVALID_SOCKET;
     }
 
@@ -91,14 +90,14 @@ SOCKET create_socket(const int& port, int family) {
     int opt_ok_2 =
         setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&SND_TIMEOUT, sizeof(SND_TIMEOUT));
     if (opt_ok_1 == SOCKET_ERROR || opt_ok_2 == SOCKET_ERROR) {
-        logger::error("Failed to set socket options");
+        logger.error("Failed to set socket options");
         return INVALID_SOCKET;
     }
 
     // bind ip and port
     int bind_ok = family == AF_INET ? bind_ipv4(s, port) : bind_ipv6(s, port);
     if (bind_ok != 0) {
-        logger::error("Failed to bind port");
+        logger.error("Failed to bind port");
         closesocket(s);
         return INVALID_SOCKET;
     }
@@ -126,12 +125,12 @@ void handle_socket(SOCKET& s_in, int family) {
         std::string msg_reply = "\u000AHELLO";
         if (strncmp(buffer, msg_hello.c_str(), msg_hello.size()) == 0) {
             std::string remote_ip = family == AF_INET ? get_ipv4(*client) : get_ipv6(*client);
-            logger::info("Connection established (", remote_ip, ")");
+            logger.info("Connection established (", remote_ip, ")");
 
             // send hello back
             if (SOCKET_ERROR ==
                 sendto(s_in, msg_reply.c_str(), msg_reply.size(), 0, client, client_size)) {
-                logger::error("Failed to reply hello");
+                logger.error("Failed to reply hello");
                 continue;
             }
             continue;
@@ -143,7 +142,7 @@ void handle_socket(SOCKET& s_in, int family) {
         if (strncmp(buffer, hs_head.c_str(), hs_head.size()) != 0) continue;
 
         // receive handshake packet: [filesize, filename]
-        logger::info("Received handshake packet");
+        logger.info("Received handshake packet");
 
         u_long file_size;
         memcpy(&file_size, buffer + hs_head.size(), sizeof(u_long));
@@ -152,7 +151,7 @@ void handle_socket(SOCKET& s_in, int family) {
 
         // check filename (starts with /, or contains .., or empty)
         if (fn.size() == 0 || fn[0] == '/' || fn.find("..") != std::string::npos) {
-            logger::info("Refused to receive file: ", fn);
+            logger.info("Refused to receive file: ", fn);
             // send reject
             std::string packet_reject = "\u000AREJECT";
             sendto(s_in, packet_reject.c_str(), packet_reject.size(), 0, client, client_size);
@@ -163,12 +162,12 @@ void handle_socket(SOCKET& s_in, int family) {
         std::string packet_ok = "\u000AOK";
         if (SOCKET_ERROR ==
             sendto(s_in, packet_ok.c_str(), packet_ok.size(), 0, client, client_size)) {
-            logger::error("Failed to reply handshake");
+            logger.error("Failed to reply handshake");
             continue;
         }
 
-        logger::info(ANSI_MAGENTA_L, "Filesize: ", ANSI_RESET, fmt_size(file_size));
-        logger::info(ANSI_MAGENTA_L, "Filename: ", ANSI_RESET, fn);
+        logger.info(ansi::bright_magenta, "Filesize: ", ansi::reset, fmt_size(file_size));
+        logger.info(ansi::bright_magenta, "Filename: ", ansi::reset, fn);
 
         // create directory
         std::string save_directory = SAVE_PATH;
@@ -178,7 +177,7 @@ void handle_socket(SOCKET& s_in, int family) {
         // create file
         std::ofstream file(save_directory + "/" + fn, std::ios::binary);
         if (dir_err || !file.is_open()) {
-            logger::error("Failed to create file");
+            logger.error("Failed to create file");
             // send drop
             std::string packet_drop = "\u000ADROP";
             sendto(s_in, packet_drop.c_str(), packet_drop.size(), 0, client, client_size);
@@ -199,20 +198,20 @@ void handle_socket(SOCKET& s_in, int family) {
                 std::string s = "";
                 if (chunk > 1) s.append(ANSI_DELLINE);
                 last_rate = rate;
-                logger::print(s, TITLE_INFO, "Receiving file (", rate, "%, ", chunk, "/", tot_chunk,
-                              ")");
+                logger.print(s, logger.get_colored_prefix(Logger::Level::INFO), "Receiving file (",
+                             rate, "%, ", chunk, "/", tot_chunk, ")");
             }
 
             // receive data
             bytes_received = recvfrom(s_in, buffer, BUFFER_SIZE, 0, client, &client_size);
             if (bytes_received == SOCKET_ERROR) {
-                logger::error("Failed to receive data");
+                logger.error("Failed to receive data");
                 file.close();
                 continue;
             }
 
             // write file
-            size_t write_size = min(file_size - read_size, (u_long)BUFFER_SIZE);
+            size_t write_size = std::min(file_size - read_size, (u_long)BUFFER_SIZE);
             file.write(buffer, write_size);
             read_size += write_size;
 
@@ -225,7 +224,7 @@ void handle_socket(SOCKET& s_in, int family) {
             if (SOCKET_ERROR == sendto(s_in, packet_rcv_buf,
                                        packet_received.size() + sizeof(chunk_net), 0, client,
                                        client_size)) {
-                logger::error("Failed to confirm received chunk");
+                logger.error("Failed to confirm received chunk");
                 file.close();
                 delete[] packet_rcv_buf;
                 continue;
@@ -233,8 +232,8 @@ void handle_socket(SOCKET& s_in, int family) {
             delete[] packet_rcv_buf;
         }
 
-        logger::info(ANSI_GREEN_L, "File received", ANSI_RESET, " (", tot_chunk,
-                     (tot_chunk > 1 ? " chunks" : " chunk"), " total)");
+        logger.info(ansi::green, "File received", ansi::reset, " (", tot_chunk,
+                    (tot_chunk > 1 ? " chunks" : " chunk"), " total)");
 
         file.close();
 
@@ -242,7 +241,7 @@ void handle_socket(SOCKET& s_in, int family) {
         packet_ok = "\u000ADONE";
         if (SOCKET_ERROR ==
             sendto(s_in, packet_ok.c_str(), packet_ok.size(), 0, client, client_size)) {
-            logger::error("Failed to confirm file received");
+            logger.error("Failed to confirm file received");
             continue;
         }
     }
@@ -251,8 +250,10 @@ void handle_socket(SOCKET& s_in, int family) {
 }
 
 int main(int argc, char* argv[]) {
+    logger.set_color(Logger::Level::INFO, ansi::bright_cyan);
+
     if (argc != 2) {
-        logger::print("Usage: udp_server <port>");
+        logger.print("Usage: udp_server <port>");
         return 0;
     }
 
@@ -262,7 +263,7 @@ int main(int argc, char* argv[]) {
     WSAData wsData;
     int ws_ok = WSAStartup(MAKEWORD(2, 2), &wsData);
     if (ws_ok != 0) {
-        logger::error("WSAStartup");
+        logger.error("WSAStartup");
         return 0;
     }
 
@@ -271,11 +272,11 @@ int main(int argc, char* argv[]) {
     SOCKET s6 = create_socket(PORT, AF_INET6);
 
     if (s4 == INVALID_SOCKET && s6 == INVALID_SOCKET) {
-        logger::error("Failed to create socket");
+        logger.error("Failed to create socket");
         return 0;
     }
 
-    logger::info("Server is running at port ", PORT);
+    logger.info("Server is running at port ", PORT);
 
     bool ipv4_active = s4 != INVALID_SOCKET;
     bool ipv6_active = s6 != INVALID_SOCKET;
