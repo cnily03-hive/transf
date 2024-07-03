@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug (server)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/transf_server",
+      "args": [
+        "3081",
+        "--debug"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build with debug (server)",
+      "stopOnEntry": false
+    },
+    {
+      "name": "Debug (client)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/transf_client",
+      "args": [
+        "127.0.0.1",
+        "3081",
+        "--debug"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build with debug (client)",
+      "stopOnEntry": false
+    }
+  ]
+}

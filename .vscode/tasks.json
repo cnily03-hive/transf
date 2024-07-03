@@ -1,0 +1,117 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "clean",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "clean"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Clean the output files"
+        },
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "make",
+            "args": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Generated task for building using make"
+        },
+        {
+            "label": "build (server)",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "transf_server"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Generated task for building server using make"
+        },
+        {
+            "label": "build (client)",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "transf_client"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Generated task for building client using make"
+        },
+        {
+            "label": "build with debug",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "DEBUG=1"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Generated task for building using make"
+        },
+        {
+            "label": "build with debug (server)",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "transf_server",
+                "DEBUG=1"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Generated task for building server using make"
+        },
+        {
+            "label": "build with debug (client)",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "transf_client",
+                "DEBUG=1"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Generated task for building client using make"
+        }
+    ]
+}

@@ -592,6 +592,9 @@ std::string clear_line_left = "\033[1K";
 std::string clear_down = "\033[J";
 std::string clear_up = "\033[1J";
 std::string cursor_home = "\033[H";
+std::string cursor_pos_line_right = "\033[1000C";
+std::string cursor_pos_x(int x) { return "\033[" + std::to_string(x) + "G"; }
+std::string cursor_pos_y(int y) { return "\033[" + std::to_string(y) + "d"; }
 std::string cursor_position(int x, int y) {
     return "\033[" + std::to_string(y) + ";" + std::to_string(x) + "H";
 }
