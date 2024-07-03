@@ -1,6 +1,6 @@
 # File Transfer
 
-This is the homework of Chapter 6 of Computer Network Experiment 2024 in CUMT.
+This is the homework of chapter 6-7 of Computer Network Experiment 2024 in CUMT.
 
 This repository Implemented file transfer via UDP/TCP protocol, with security check and beautified output.
 
@@ -8,9 +8,9 @@ This repository Implemented file transfer via UDP/TCP protocol, with security ch
 
 The compile environment is MinGW Clang Toolchian, posix thread, C++ 20 standard on Windows OS. Please make sure you have Windows Kits on your computer.
 
-If you meet problems when compiling, give a try to [LLVM MinGW](https://github.com/mstorsjo/llvm-mingw/releases).
+If you meet problems when compiling, give a try to [LLVM MinGW](https://github.com/mstorsjo/llvm-mingw/releases), or refer to [Github CI](./.github/workflows/compile.yml).
 
-The program will save the received file to the `./received` by default, you can change the directory by using the `--dir` option.
+The program will save the received file to `./received` by default, you can change the directory by using the `--dir` option.
 
 For more information, please refer to the help message via `--help`.
 

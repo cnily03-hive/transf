@@ -2,7 +2,7 @@ CXX = clang++
 
 INCLUDES = -I./include -I./src
 
-CXXFLAGS = $(INCLUDES) -Wall -Wextra -std=c++20
+CXXFLAGS = $(INCLUDES) -static -Wall -Wextra -std=c++20
 FLAGS =
 
 DEBUG ?= 0
