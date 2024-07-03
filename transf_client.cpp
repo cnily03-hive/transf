@@ -114,13 +114,13 @@ int send_file(SocketClient& remote, const std::string& fp, char* buf, int buf_si
                          rate, "%)", ansi::reset);
         }
 
-        auto print_fail = [&fp, &ANSI_PREV_LINE, &IS_DEBUG]() {
+        auto print_fail = [&fp, &IS_DEBUG]() {
             logger.print(IS_DEBUG ? ""
                                   : ansi::clear_line + ansi::cursor_prev_line(1) +
                                         ansi::cursor_pos_x(fp.size() + 6),
                          ansi::rgb_fg(139, 0, 0), "  (Failed)", ansi::reset);
         };
-        auto print_success = [&fp, &ANSI_PREV_LINE, &IS_DEBUG]() {
+        auto print_success = [&fp, &IS_DEBUG]() {
             logger.print(IS_DEBUG
                              ? ""
                              : ansi::clear_line + ansi::cursor_prev_line(1) + ansi::clear_line +

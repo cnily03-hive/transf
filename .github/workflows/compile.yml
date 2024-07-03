@@ -4,15 +4,40 @@ on: [push, pull_request]
 
 jobs:
   test:
-    name: Compile
+    name: Compile (${{ matrix.sys }})
     runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - { sys: mingw64, env: x86_64 }
+          - { sys: mingw32, env: i686 }
+          - { sys: ucrt64,  env: ucrt-x86_64 }
+          - { sys: clang64, env: clang-x86_64 }
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: msys2/setup-msys2@v2
         with:
           update: true
-          msystem: mingw64
-          install: mingw-w64-x86_64-llvm
+          cache: true
+          msystem: ${{ matrix.sys }}
+          install: >-
+            mingw-w64-${{ matrix.env }}-toolchain
+            mingw-w64-${{ matrix.env }}-clang
+            mingw-w64-${{ matrix.env }}-make
+            make
+
+      - name: Add environment variables
+        run: |
+          echo "export PATH=/${{ matrix.sys }}/bin:$PATH" >> $GITHUB_ENV
+          echo "export CC=clang" >> $GITHUB_ENV
+          echo "export CXX=clang++" >> $GITHUB_ENV
+
       - name: Compile source code
         run: |
           echo "::group::Clang++ version"
@@ -21,3 +46,13 @@ jobs:
           echo "::group::Compiling"
           make
           echo "::endgroup::"
+
+      - name: Export artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: build-artifacts-${{ matrix.env }}
+          path: |
+            ./transf_server.exe
+            ./transf_client.exe
+          if-no-files-found: warn
+          retention-days: 30

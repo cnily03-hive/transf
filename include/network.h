@@ -12,6 +12,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <functional>
 
 typedef uint8_t ip_version;
 typedef int ip_family;
@@ -176,7 +177,7 @@ class BasicSocket {
 class SocketPeer : public BasicSocket {
    protected:
     BasicSocket* m_p_bsock_from;
-    mutable std::list<const PeerCloseHandler> m_pCloseHandlers;
+    mutable std::list<PeerCloseHandler> m_pCloseHandlers;
 
    public:
     SocketPeer() = default;
@@ -241,9 +242,9 @@ class SocketClient : public BasicSocket {
 class SocketServer : public BasicSocket {
    protected:
     std::map<u_long, SocketPeer&> m_clients;  // TODO: unused
-    mutable std::list<const StreamHandler> m_pStreamHandlers;
-    mutable std::list<const MessageHandler> m_pMessageHandlers;
-    mutable std::list<const ServerCloseHandler> m_pCloseHandlers;
+    mutable std::list<StreamHandler> m_pStreamHandlers;
+    mutable std::list<MessageHandler> m_pMessageHandlers;
+    mutable std::list<ServerCloseHandler> m_pCloseHandlers;
     int m_max_clients = SOMAXCONN;
     mutable bool m_serving = false;
     mutable std::vector<std::thread> m_threads;
