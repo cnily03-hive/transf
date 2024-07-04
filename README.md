@@ -2,13 +2,13 @@
 
 This is the homework of chapter 6-7 of Computer Network Experiment 2024 in CUMT.
 
-This repository Implemented file transfer via UDP/TCP protocol, with security check and beautified output.
+This repository implemented file transfer via UDP/TCP protocol, with security check and beautified output.
 
 ## Development
 
 The compile environment is MinGW Clang Toolchian, posix thread, C++ 20 standard on Windows OS. Please make sure you have Windows Kits on your computer.
 
-If you meet problems when compiling, give a try to [LLVM MinGW](https://github.com/mstorsjo/llvm-mingw/releases), or refer to [Github CI](./.github/workflows/compile.yml).
+If you meet problems when compiling, give a try to [LLVM MinGW](https://github.com/mstorsjo/llvm-mingw/releases), or refer to [workflow file](./.github/workflows/compile.yml).
 
 The program will save the received file to `./received` by default, you can change the directory by using the `--dir` option.
 
@@ -41,6 +41,7 @@ Options:
   --protocol <protocol>    Specify the protocol to use (default: udp)
   --tcp                    Equivalent to --protocol tcp
   --udp                    Equivalent to --protocol udp
+  --chunk <size>           Set chunk size for file transfer (default: 2048)
   --timeout <timeout>      Set timeout for sending and receiving data (default: 10000)
 
 Copyright (c) 2024 Jevon Wang, MIT License

@@ -191,6 +191,7 @@ inline void cli_usage() {
         "  --protocol <protocol>    Specify the protocol to use (default: udp)\n"
         "  --tcp                    Equivalent to --protocol tcp\n"
         "  --udp                    Equivalent to --protocol udp\n"
+        "  --chunk <chunk_size>     Set chunk size for file transfer (default: 2048)\n"
         "  --timeout <timeout>      Set timeout for sending and receiving data (default: 10000)\n"
         "\n"
         "Copyright (c) 2024 Jevon Wang, MIT License\n"
