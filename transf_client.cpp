@@ -63,16 +63,33 @@ int handle_hello(SocketClient& remote, char* buf, int buf_size) {
     return 0;
 }
 
-bool check_alive(SocketClient& remote, char* buf, int buf_size, int retry = 1) {
-    for (int i = 0; i < retry; i++) {
-        logger.debug(i == 0 ? "Connecting" : "Reconnecting");
+bool check_alive(SocketClient& remote, char* buf, int buf_size, int retry = 1,
+                 bool do_print = false) {
+    for (int i = 0; i <= retry; i++) {
+        auto level = logger.get_level();
+        std::string progress = "(" + std::to_string(i) + "/" + std::to_string(retry) + ")";
+        if (do_print && level > Logger::Level::DEBUG && i > 0) {
+            std::string tip = "Reconnecting " + progress;
+            if (i > 1) tip = ansi::cursor_prev_line(1) + ansi::clear_line + tip;
+            logger.print(tip);
+        } else {
+            logger.debug(i == 0 ? "Checking alive" : ("Reconnecting " + progress));
+        }
+
+        if (i > 0) remote.reconnect();
+
         int err = handle_hello(remote, buf, opt_chunk_size);
         if (err == 0) {
+            if (do_print && level > Logger::Level::DEBUG && i > 0) {
+                logger.instant(ansi::cursor_prev_line(1) + ansi::clear_line);
+            }
             return true;
         } else {
             logger.debug("Sent faild (code ", err, ")");
+            if (do_print && level > Logger::Level::DEBUG && i > 0 && i == retry) {
+                logger.instant(ansi::cursor_prev_line(1) + ansi::clear_line);
+            }
         }
-        remote.reconnect();
     }
     return false;
 }
@@ -403,7 +420,7 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < maxtry; i++) {
             client.connect();
             auto start = Timer::point();
-            bool alive = check_alive(client, buf, opt_chunk_size, 1);
+            bool alive = check_alive(client, buf, opt_chunk_size, 0, false);
             auto end = Timer::point();
             std::string ms = std::to_string(Timer::duration(start, end));
             if (alive) {
@@ -424,7 +441,7 @@ int main(int argc, char* argv[]) {
 
     // everything goes well
     client.connect();
-    if (!check_alive(client, buf, opt_chunk_size, 3)) {
+    if (!check_alive(client, buf, opt_chunk_size, 3, true)) {
         return logger.error("Cannot connect to server"), 1;
     } else {
         logger.debug("Connceted");
@@ -443,7 +460,7 @@ int main(int argc, char* argv[]) {
             std::string fore_str = join_string(ansi::bright_cyan, "> ", ansi::reset, input);
             std::string fp = input;
 
-            if (!check_alive(client, buf, opt_chunk_size, 3)) {
+            if (!check_alive(client, buf, opt_chunk_size, 3, false)) {
                 logger.error("Cannot connect to server");
                 continue;
             }

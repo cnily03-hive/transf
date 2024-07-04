@@ -587,13 +587,15 @@ int main(int argc, char* argv[]) {
     std::list<SocketServer> servers;
     bool err_bindport = false;
     for (addrcoll* paddr = ipinfo; paddr != nullptr; paddr = paddr->ai_next) {
-        SocketServer server((BasicSocket(paddr)));
+        servers.emplace_back(BasicSocket(paddr));
+        SocketServer& server = servers.back();
         std::string address_to_bind = server.conn_info().to_string();
 
         // init socket
         err = server.init_socket();
         if (err != 0) {
             logger.debug("Failed to create socket for ", address_to_bind, " (", err, ")");
+            server.destroy(), servers.pop_back();
             continue;
         }
         // set socket options
@@ -606,7 +608,7 @@ int main(int argc, char* argv[]) {
                         (const char*)&SND_TIMEOUT, sizeof(SND_TIMEOUT));
         if (e1 == SOCKET_ERROR || e2 == SOCKET_ERROR) {
             logger.error("Failed to set socket options (", e1, ", ", e2, ")");
-            server.destroy();
+            server.destroy(), servers.pop_back();
             continue;
         }
         // bind address
@@ -614,19 +616,18 @@ int main(int argc, char* argv[]) {
         if (err != 0) {
             logger.debug("Failed to bind socket for ", address_to_bind, " (", err, ")");
             if (err == WSAEADDRINUSE) err_bindport = true;
-            server.destroy();
+            server.destroy(), servers.pop_back();
             continue;
         }
 
         if (!server.ensure()) {
             logger.debug("Socket is not ready for ", address_to_bind);
-            server.destroy();
+            server.destroy(), servers.pop_back();
             continue;
         }
 
         // everything goes well
         server.listen();
-        servers.push_back(server);
     }
     FreeAddrInfo(ipinfo);
 

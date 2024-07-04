@@ -1,5 +1,9 @@
 # File Transfer
 
+[![Issues](https://img.shields.io/github/issues-raw/cnily03-hive/transf)](https://github.com/cnily03-hive/transf/issues)
+[![Stars](https://img.shields.io/github/stars/cnily03-hive/transf)](https://github.com/cnily03-hive/transf/stargazers)
+[![License](https://img.shields.io/github/license/cnily03-hive/transf)](https://github.com/cnily03-hive/transf?tab=MIT-1-ov-file)
+
 This is the homework of chapter 6-7 of Computer Network Experiment 2024 in CUMT.
 
 This repository implemented file transfer via UDP/TCP protocol, with security check and beautified output.

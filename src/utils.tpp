@@ -4,7 +4,6 @@
 #include <random>
 #include <sstream>
 #include <string>
-#include <thread>
 
 typedef unsigned long u_long;
 
@@ -87,6 +86,7 @@ int Timer::sleep(int milliseconds) {
     return milliseconds;
 }
 #else
+#include <thread>
 int Timer::sleep(int milliseconds) {
     std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
     return milliseconds;
