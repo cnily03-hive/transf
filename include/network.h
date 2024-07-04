@@ -6,13 +6,13 @@
 #include <ws2tcpip.h>
 
 #include <cstddef>
+#include <functional>
 #include <list>
 #include <map>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
-#include <functional>
 
 typedef uint8_t ip_version;
 typedef int ip_family;
@@ -138,6 +138,7 @@ class BasicSocket {
 
     int init_socket();
     int bind_address();
+
     virtual int close() const;
     virtual int destroy() const;
     static int terminate();
@@ -193,7 +194,7 @@ class SocketPeer : public BasicSocket {
     SocketPeer(BasicSocket* p_bsocket_from, addrcoll* paddr_peer, SOCKET s) noexcept;
     // TODO: pointer unsafe? shall we write ~SocketPeer() ?
 
-    bool ensure_addr() const override;
+    bool ensure() const override;
 
     int send(const char* buf, int len) const;
     int send(const std::string str) const;
@@ -202,11 +203,12 @@ class SocketPeer : public BasicSocket {
     int recv(std::string& str, int maxlen) const;
 
     int onclose(const PeerCloseHandler& pHandler) const;
+    int end() const;
     int close() const override;
 };
 
 //===--------------------------------------------------===//
-// class SocketServer
+// class SocketClient
 //===--------------------------------------------------===//
 
 class SocketClient : public BasicSocket {
@@ -220,12 +222,15 @@ class SocketClient : public BasicSocket {
     SocketClient(const BasicSocket& bs) noexcept;
     SocketClient(BasicSocket&& bs) noexcept;
 
+    bool ensure_addr() const override;
+
     int send(const char* buf, int len) const;
     int send(const std::string str) const;
 
     int recv(char* buf, int maxlen) const;
     int recv(std::string& str, int maxlen) const;
 
+    int end() const;
     int connect() const;
     int reconnect(bool force = false);
 
@@ -282,7 +287,9 @@ class SocketServer : public BasicSocket {
     // each handler will be called synchronously (by its order of registration)
     int onclose(const ServerCloseHandler& pHandler) const;
 
+    int end() const;
     int close() const override;
+    int destroy() const override;
     int wait() const;
 };
 

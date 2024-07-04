@@ -4,7 +4,9 @@
 
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -42,19 +44,91 @@ enum struct TransferStatus {
     DONE,
 };
 
-std::string opt_save_path = "./received";
-int opt_chunk_size = 2048;
+std::string opt_abs_save_path = "";
 
 struct TransferInfo {
     TransferStatus status;
     std::string filename;
-    u_long file_size;
+    u_long filesize;
+    std::string abs_fp;
     u_long written;
     std::ofstream* fs;
     u_long chunk;
+    int last_update_time;
+    std::mutex* mutex;
+    int update_time() { return last_update_time = Timer::timestamp(); }
+    bool use() {
+        bool is_lock = mutex->try_lock();
+        update_time();
+        return is_lock;
+    }
+    bool unuse() {
+        update_time();
+        mutex->unlock();
+        return true;
+    }
 };
 
 std::map<std::string, TransferInfo> file_transfer_info;
+
+std::mutex file_transfer_info_mutex;
+
+bool need_cleanup = false;
+
+void cleanup_expired_file_transfer_info(int live_time, int check_interval) {
+    while (need_cleanup) {
+        logger.debug(("[Cleanup] Check start"));
+        UniqueLock lockmap(file_transfer_info_mutex);
+        int curtime = Timer::timestamp();
+        for (auto it = file_transfer_info.begin(); it != file_transfer_info.end();) {
+            lockmap.unlock();
+            std::string uuid = it->first;
+            TransferInfo& info = it->second;
+            auto pmutex = info.mutex;
+            UniqueLock lock(*pmutex, std::try_to_lock);
+            // still alive
+            if (!lock.owns_lock() && info.last_update_time + live_time > curtime) {
+                lockmap.lock();
+                ++it;
+                continue;
+            }
+            // not alive
+            logger.debug("[Cleanup] Cleaning expired file transfer: ", uuid);
+            if (info.fs != nullptr) {
+                info.fs->close();
+                delete info.fs;
+                info.fs = nullptr;
+            }
+            // remove file object if exists
+            if (std::filesystem::exists(info.abs_fp)) {
+                bool success_remove = false;
+                try {
+                    success_remove = std::filesystem::remove(info.abs_fp.c_str());
+                } catch (std::filesystem::filesystem_error& e) {
+                    int prefixlen =
+                        ansi::remove_ansi(logger.get_colored_prefix(Logger::Level::ERROR)).size();
+                    logger.error("[Cleanup] Failed to remove file: ", ansi::gray, info.abs_fp,
+                                 ansi::reset);
+                    logger.level_print(Logger::Level::ERROR, std::string(prefixlen, ' '), e.what());
+                }
+                if (!success_remove) {
+                    logger.error("[Cleanup] Failed to remove file: ", ansi::gray, info.abs_fp,
+                                 ansi::reset);
+                } else {
+                    logger.debug("[Cleanup] File removed: ", ansi::gray, info.abs_fp, ansi::reset);
+                }
+            }
+            // remove from map
+            lockmap.lock();
+            it = file_transfer_info.erase(it);
+            lock.unlock();
+            delete pmutex;
+        }
+        lockmap.unlock();
+        logger.debug("[Cleanup] Check sleep");
+        Timer::sleep(check_interval);
+    }
+}
 
 #define headcmp(buf, head) memcmp(buf, head, strlen(head)) == 0
 
@@ -94,46 +168,81 @@ int handle_file_transfer(const char* buf, int len, const SocketPeer& peer,
         }
 
         // create directory
-        std::string save_directory = opt_save_path;
-        int create_dir_err = CreateDirectory(save_directory.c_str(), NULL);
+        std::filesystem::path save_dir_abspath(opt_abs_save_path);
+        int create_dir_err = CreateDirectory(save_dir_abspath.string().c_str(), NULL);
         int is_already_exists = create_dir_err == 0 && GetLastError() == ERROR_ALREADY_EXISTS;
         bool dir_err = create_dir_err == 0 && !is_already_exists;
         // create file
-        std::string save_path = save_directory + "/" + fn;
-        std::ofstream* pfs = new std::ofstream(save_path, std::ios::binary);
+        std::string save_fp_str = (save_dir_abspath / fn).string();
+        std::ofstream* pfs = new std::ofstream(save_fp_str, std::ios::binary);
         if (dir_err || !pfs->is_open()) {
-            logger.error(address, " - ", "Failed to create file: ", save_path);
+            logger.error(address, " - ", "Failed to create file: ", save_fp_str);
             // send drop
             pfs->close();
             delete pfs;
             return peer.send(HEAD_DROP), HANDLE_END;
         }
 
-        logger.info(address, " - ", "Receiving file (", fmt_size(file_size), "): ", fn);
+        logger.info(address, " - ", "Receiving file (", fmt_size(file_size), "): ", ansi::gray, fn,
+                    ansi::reset);
 
         auto uuid = uuid_v1();
 
-        TransferInfo info{TransferStatus::HANDSHAKE, fn, file_size, 0, pfs, 1};
-        file_transfer_info.insert({uuid, info});
+        TransferInfo info{
+            TransferStatus::HANDSHAKE, fn, file_size, save_fp_str, 0, pfs, 1, Timer::timestamp(),
+            new std::mutex()};
+        // ! Do not forget to unuse() before return !! Or it will never be used again or removed !!!
+        info.use();
+        {  // insert to map, it may be deleted if info is not in use
+            UniqueLock _lock(file_transfer_info_mutex);
+            file_transfer_info.insert({uuid, info});
+        }
 
+        // only stream socket will call this onclose
         peer.onclose([uuid](const SocketPeer& peer) -> int {
+            logger.info(peer.conn_info().to_string(true), "- Connection closed - ", uuid);
+            UniqueLock _lock(file_transfer_info_mutex);
             auto it = file_transfer_info.find(uuid);
             if (it != file_transfer_info.end()) {
-                logger.info("Connection closed: ", peer.conn_info().to_string(true), " (", uuid,
-                            ")");
+                auto pmutex = it->second.mutex;
                 TransferInfo& info = it->second;
                 if (info.fs != nullptr) {
                     info.fs->close();
                     delete info.fs;
                     info.fs = nullptr;
                 }
+
+                // remove file object if exists
+                if (std::filesystem::exists(info.abs_fp)) {
+                    bool success_remove = false;
+                    try {
+                        success_remove = std::filesystem::remove(info.abs_fp.c_str());
+                    } catch (std::filesystem::filesystem_error& e) {
+                        int prefixlen =
+                            ansi::remove_ansi(logger.get_colored_prefix(Logger::Level::ERROR))
+                                .size();
+                        logger.error("Failed to remove file: ", ansi::gray, info.abs_fp,
+                                     ansi::reset);
+                        logger.level_print(Logger::Level::ERROR, std::string(prefixlen, ' '),
+                                           e.what());
+                    }
+                    if (!success_remove) {
+                        logger.error("Failed to remove file: ", ansi::gray, info.abs_fp,
+                                     ansi::reset);
+                    } else {
+                        logger.debug("File removed: ", ansi::gray, info.abs_fp, ansi::reset);
+                    }
+                }
+
                 file_transfer_info.erase(uuid);
+                pmutex->unlock();
+                delete pmutex;
             }
             return 0;
         });
 
         peer.send(HEAD_OK + uuid);
-        return HANDLE_END;
+        return info.unuse(), HANDLE_END;
 
     }
 
@@ -146,10 +255,14 @@ int handle_file_transfer(const char* buf, int len, const SocketPeer& peer,
         std::string uuid(buf + LEN_HEAD, UUID_LEN);
         if (IS_DEBUG) logger.instant(ansi::cursor_prev_line(1) + ansi::clear_line);
         logger.debug(address, " - ", "Transfering - ", uuid);
+
+        UniqueLock lockmap(file_transfer_info_mutex);  // lock global map
         auto it = file_transfer_info.find(uuid);
         if (it == file_transfer_info.end()) return peer.send(HEAD_REJECT), HANDLE_END;
 
         TransferInfo& info = it->second;
+        if (!info.use()) return info.unuse(), peer.send(HEAD_REJECT), HANDLE_END;
+        lockmap.unlock();
 
         // verify chunk
         u_long chunk;
@@ -157,33 +270,34 @@ int handle_file_transfer(const char* buf, int len, const SocketPeer& peer,
         chunk = ntohl(chunk);
         if (IS_DEBUG) logger.instant(ansi::cursor_prev_line(1) + ansi::clear_line);
         logger.debug(address, " - ", "Transfering - ", uuid, " - ", chunk, "/", info.chunk);
-        if (chunk != info.chunk) return peer.send(HEAD_REJECT), HANDLE_END;
+        if (chunk != info.chunk) return info.unuse(), peer.send(HEAD_REJECT), HANDLE_END;
 
         auto& fs = *info.fs;
 
         int this_written = len - LEN_HEAD - UUID_LEN - sizeof(u_long);
         if (this_written <= 0)
             this_written = 0;
-        else if (info.file_size <= info.written)
+        else if (info.filesize <= info.written)
             this_written = 0;
-        else if (info.file_size < info.written + this_written)
-            this_written = info.file_size - info.written;
+        else if (info.filesize < info.written + this_written)
+            this_written = info.filesize - info.written;
 
         if (this_written > 0) {
+            if (!fs.is_open()) return info.unuse(), peer.send(HEAD_DROP), HANDLE_END;
             fs.write(buf + LEN_HEAD + UUID_LEN + sizeof(u_long), this_written);
             // info.written = fs.tellp();
             info.written += this_written;
             if (IS_DEBUG) logger.instant(ansi::cursor_prev_line(1) + ansi::clear_line);
             logger.debug(address, " - ", "Transfering - ", uuid, " - ", chunk, "/", info.chunk,
-                         " - add ", info.written, "/", info.file_size, " bytes");
+                         " - add ", info.written, "/", info.filesize, " bytes");
             ++info.chunk;
         }
         u_long chunk_net = htonl(info.chunk);
-        if (info.written >= info.file_size) {
+        if (info.written >= info.filesize) {
             fs.close();
             delete info.fs;
             info.fs = nullptr;
-            logger.info(address, " - ", "File received (", fmt_size(info.file_size),
+            logger.info(address, " - ", "File received (", fmt_size(info.filesize),
                         "): ", info.filename);
             int buflen = strlen(HEAD_DONE) + UUID_LEN + sizeof(u_long);
             char* buf = new char[buflen];
@@ -192,8 +306,13 @@ int handle_file_transfer(const char* buf, int len, const SocketPeer& peer,
             memcpy(buf + strlen(HEAD_DONE) + UUID_LEN, &chunk_net, sizeof(u_long));
             peer.send(buf, buflen);
             delete[] buf;
+            lockmap.lock();
+            auto pmutex = info.mutex;
             file_transfer_info.erase(uuid);
-            // peer.close();
+            pmutex->unlock();
+            delete pmutex;
+            lockmap.unlock();
+            peer.end();
             return HANDLE_END;
         } else {
             int buflen = strlen(HEAD_RECEIVED) + UUID_LEN + sizeof(u_long);
@@ -203,7 +322,7 @@ int handle_file_transfer(const char* buf, int len, const SocketPeer& peer,
             memcpy(buf + strlen(HEAD_RECEIVED) + UUID_LEN, &chunk_net, sizeof(u_long));
             peer.send(buf, buflen);
             delete[] buf;
-            return HANDLE_END;
+            return info.unuse(), HANDLE_END;
         }
     }
 
@@ -217,12 +336,12 @@ struct CLIOptions {
     std::string ip = "";  // any
     int port;
     ip_version ip_ver = IPv4 | IPv6;
-    ip_family ip_family = AF_UNSPEC;
     SockType socktype = SockType::TYPE_DGRAM;
-    std::string& save_path = ::opt_save_path;
-    int& chunk_size = ::opt_chunk_size;
+    std::string save_path = "./received";
+    int chunk_size = 2048;
     int timeout_recv = 10000;
     int timeout_send = 10000;
+    bool listen_all = false;
 };
 
 inline void cli_usage() {
@@ -231,13 +350,15 @@ inline void cli_usage() {
         "\n"
         "Options:\n"
         "  -h, --help               Display this help message\n"
-        "  --debug                  Enable debug mode\n"
         "  -d, --dir <path>         Save received files to the specified directory\n"
         "  --protocol <protocol>    Specify the protocol to use (default: udp)\n"
         "  --tcp                    Equivalent to --protocol tcp\n"
         "  --udp                    Equivalent to --protocol udp\n"
         "  --chunk <size>           Set chunk size for file transfer (default: 2048)\n"
-        "  --timeout <timeout>      Set timeout for sending and receiving data (default: 10000)\n"
+        "  --timeout <timeout>      Set timeout for sending and receiving data (default: "
+        "10000)\n"
+        "  --debug                  Enable debug mode\n"
+        "  --listen-all             Listen on all available interfaces\n"
         "\n"
         "Copyright (c) 2024 Jevon Wang, MIT License\n"
         "Source code: github.com/cnily03-hive/transf");
@@ -273,6 +394,11 @@ int main(int argc, char* argv[]) {
                 return logger.error("Missing argument for --dir"), 1;
             }
             options.save_path = std::string(next);
+            try {
+                auto t = std::filesystem::canonical(options.save_path).string();
+            } catch (...) {
+                return logger.error("Invalid path: ", options.save_path), 1;
+            }
         } else if (arg_match(cur_argstr, "--protocol")) {
             // opt: --protocol
             auto next = args.next();
@@ -328,6 +454,8 @@ int main(int argc, char* argv[]) {
             } catch (...) {
                 return logger.error("Invalid timeout: ", next), 1;
             }
+        } else if (arg_match(cur_argstr, "--listen-all")) {
+            options.listen_all = true;
         } else if (cur_argstr.starts_with("--")) {
             // long options
             return logger.error("Unknown option: ", cur_argstr), 1;
@@ -362,19 +490,34 @@ int main(int argc, char* argv[]) {
     } else {
         // specified ip and port
         options.has_opt_ip = true;
-        options.ip_ver = get_ipversion(p1);
-        if (options.ip_ver == 0) {
-            return logger.error("Invalid IP address: ", p1), 1;
-        }
         if (!check_port(p2)) {
             return logger.error("Invalid port: ", p2), 1;
         }
         options.port = std::stoi(p2);
-        options.ip = p1;
+        if (options.listen_all) {
+            options.ip = "";
+            options.ip_ver = IPv4 | IPv6;
+        } else {
+            options.ip_ver = get_ipversion(p1);
+            if (options.ip_ver == 0) {
+                return logger.error("Invalid IP address: ", p1), 1;
+            }
+            options.ip = p1;
+        }
     }
 
     p1 = p2 = nullptr;
 
+    // parse absolute path
+    if (options.save_path.empty()) {
+        return logger.error("Undefined save path, use --dir to specify."), 1;
+    }
+    try {
+        opt_abs_save_path = std::filesystem::canonical(options.save_path).string();
+    } catch (...) {
+        logger.error("An error occurred while parsing the save path: ", options.save_path);
+        return 1;
+    }
     // End of parsing command line arguments
     // it's ensured that `options.ip` is a valid ipaddress or empty string ("")
     // `options.ip_ver` must be IPv4 or IPv6 or both
@@ -395,14 +538,11 @@ int main(int argc, char* argv[]) {
         logger.print(" - IP Version: ", options.ip_ver == IPv6   ? "IPv6"
                                         : options.ip_ver == IPv4 ? "IPv4"
                                                                  : "IPv4, IPv6");
-        logger.print(" - IP Family: ", options.ip_family == AF_INET6  ? "IPv6"
-                                       : options.ip_family == AF_INET ? "IPv4"
-                                                                      : "Unspecified");
         logger.print(" - Chunk Size: ", options.chunk_size, " Bytes");
         logger.print(" - Timeout (Recv): ", options.timeout_recv);
         logger.print(" - Timeout (Send): ", options.timeout_send);
+        logger.print(" - Save path: ", options.save_path);
     }
-    logger.info("Save path: ", ansi::gray, options.save_path, ansi::reset);
 
     //===--------------------------------------------------===//
     // Socket initialization
@@ -420,7 +560,7 @@ int main(int argc, char* argv[]) {
     addrhint hints = get_hints(options.ip_ver, options.socktype);
     // parsed information of ip address(es)
     addrcoll* ipinfo = nullptr;
-    if (options.has_opt_ip) {
+    if (options.has_opt_ip || options.listen_all) {
         // `ip_addrcoll` is used to inject ip and port from a hint to a socket
         // if ip is "", it will automatically bind to all available ip addresses
         // however, it may not include ip address(es) on loopback interface
@@ -428,7 +568,7 @@ int main(int argc, char* argv[]) {
         if (err != 0)
             return logger.error("Failed to parse ip address (", err, ")"), WSACleanup(), 1;
     }
-    if (!options.has_opt_ip) {
+    if (!options.has_opt_ip || options.listen_all) {
         // if user does not specify ip address, we need append loopback address to the results
         // list
         addrcoll* loopback_info_udp = nullptr;
@@ -496,15 +636,22 @@ int main(int argc, char* argv[]) {
         return BasicSocket::terminate(), 1;
     }
 
-    logger.instant("Server is running, ready on:", END_LINE);
+    logger.append_stream("Server is running, ready on:", END_LINE);
     for (auto& server : servers) {
-        logger.instant("  ", server.conn_info().to_string(), END_LINE);
+        logger.append_stream("  ", server.conn_info().to_string(), END_LINE);
     }
     logger.instant("You can access this server by the above address",
                    servers.size() > 1 ? "es" : "", END_LINE);
+    logger.print("The file received will be storaged at: ", ansi::gray, opt_abs_save_path,
+                 ansi::reset);
     logger.endl();
 
     std::vector<std::thread> threads;
+
+    need_cleanup = true;
+    std::thread cleanup_thread(cleanup_expired_file_transfer_info,
+                               int(options.timeout_send + options.timeout_recv),
+                               int((options.timeout_send + options.timeout_recv) * 1.5));
 
     for (auto& server : servers) {
         server.onmessage(&handle_hello);
@@ -517,8 +664,12 @@ int main(int argc, char* argv[]) {
         if (t.joinable()) t.join();
     }
 
+    need_cleanup = false;
+    if (cleanup_thread.joinable()) cleanup_thread.join();
+
     // Clean up
     for (auto& server : servers) {
+        server.close();
         server.destroy();
     }
     BasicSocket::terminate();

@@ -4,6 +4,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <thread>
 
 typedef unsigned long u_long;
 
@@ -61,3 +62,33 @@ std::string uuid_v1() {
 
     return ss.str();
 }
+
+typedef std::chrono::time_point<std::chrono::high_resolution_clock> time_point_highclock;
+
+class Timer {
+   public:
+    static int timestamp() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::system_clock::now().time_since_epoch())
+            .count();
+    }
+    static time_point_highclock point() { return std::chrono::high_resolution_clock::now(); }
+    static int duration(time_point_highclock start, time_point_highclock end) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    }
+    static int sleep(int milliseconds);
+};
+
+// if windows
+#ifdef _WIN32
+#include <synchapi.h>
+int Timer::sleep(int milliseconds) {
+    Sleep(milliseconds);
+    return milliseconds;
+}
+#else
+int Timer::sleep(int milliseconds) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+    return milliseconds;
+}
+#endif

@@ -53,14 +53,28 @@ int opt_chunk_size = 2048;
 
 #define headcmp(buf, head) (memcmp(buf, head, strlen(head)) == 0)
 
-int check_alive(SocketClient& remote, char* buf, int buf_size) {
+int handle_hello(SocketClient& remote, char* buf, int buf_size) {
     // Hello
-    logger.debug("Hello");
     int err = remote.send(HEAD_HELLO);
     if (err == SOCKET_ERROR) return -1;
+    logger.debug("Hello sent");
     int size = remote.recv(buf, buf_size);
     if (size <= 0) return -1;
     return 0;
+}
+
+bool check_alive(SocketClient& remote, char* buf, int buf_size, int retry = 1) {
+    for (int i = 0; i < retry; i++) {
+        logger.debug(i == 0 ? "Connecting" : "Reconnecting");
+        int err = handle_hello(remote, buf, opt_chunk_size);
+        if (err == 0) {
+            return true;
+        } else {
+            logger.debug("Sent faild (code ", err, ")");
+        }
+        remote.reconnect();
+    }
+    return false;
 }
 
 int send_file(SocketClient& remote, const std::string& fp, char* buf, int buf_size) {
@@ -73,7 +87,7 @@ int send_file(SocketClient& remote, const std::string& fp, char* buf, int buf_si
     if (!fs.is_open()) return logger.error("File not found: ", ansi::gray, fp, ansi::reset), -1;
 
     // Handshake
-    logger.debug("Handshake");
+    logger.debug("[START] Handshake");
 
     fs.seekg(0, std::ios::end);
     std::streamsize file_size = fs.tellg();
@@ -90,7 +104,7 @@ int send_file(SocketClient& remote, const std::string& fp, char* buf, int buf_si
     const std::string uuid = std::string(buf + strlen(HEAD_OK), UUID_LEN);
 
     // Transfer
-    logger.debug("Transfer");
+    logger.debug("[START] Transfer");
 
     u_long chunk = 0;
     u_long send_buf_size = buf_size - strlen(HEAD_TRANSFER) - UUID_LEN - sizeof(u_long);
@@ -172,9 +186,8 @@ struct CLIOptions {
     std::string ip;
     int port;
     ip_version ip_ver = IPv4 | IPv6;
-    ip_family ip_family = AF_UNSPEC;
     SockType socktype = SockType::TYPE_DGRAM;
-    int& chunk_size = opt_chunk_size;
+    int chunk_size = 2048;
     int timeout_recv = 10000;
     int timeout_send = 10000;
     bool ping = false;
@@ -186,13 +199,13 @@ inline void cli_usage() {
         "\n"
         "Options:\n"
         "  -h, --help               Display this help message\n"
-        "  --debug                  Enable debug mode\n"
         "  --ping                   Ping the server\n"
         "  --protocol <protocol>    Specify the protocol to use (default: udp)\n"
         "  --tcp                    Equivalent to --protocol tcp\n"
         "  --udp                    Equivalent to --protocol udp\n"
         "  --chunk <chunk_size>     Set chunk size for file transfer (default: 2048)\n"
         "  --timeout <timeout>      Set timeout for sending and receiving data (default: 10000)\n"
+        "  --debug                  Enable debug mode\n"
         "\n"
         "Copyright (c) 2024 Jevon Wang, MIT License\n"
         "Source code: github.com/cnily03-hive/transf");
@@ -298,6 +311,8 @@ int main(int argc, char* argv[]) {
         args.next();
     }
 
+    opt_chunk_size = options.chunk_size;
+
     // End processing arguments
 
     if (options.ping) logger.set_level(Logger::Level::INFO);
@@ -327,9 +342,6 @@ int main(int argc, char* argv[]) {
         logger.print(" - IP Version: ", options.ip_ver == IPv6   ? "IPv6"
                                         : options.ip_ver == IPv4 ? "IPv4"
                                                                  : "IPv4, IPv6");
-        logger.print(" - IP Family: ", options.ip_family == AF_INET6  ? "IPv6"
-                                       : options.ip_family == AF_INET ? "IPv4"
-                                                                      : "Unspecified");
         logger.print(" - Chunk Size: ", options.chunk_size, " Bytes");
         logger.print(" - Timeout (Recv): ", options.timeout_recv);
         logger.print(" - Timeout (Send): ", options.timeout_send);
@@ -356,6 +368,7 @@ int main(int argc, char* argv[]) {
         return logger.error("Failed to parse ip address (", err, ")"), BasicSocket::terminate(), 1;
 
     // Create socket
+    logger.debug("Creating socket");
     SocketClient client((BasicSocket(ipinfo)));
     // init
     err = client.init_socket();
@@ -375,8 +388,6 @@ int main(int argc, char* argv[]) {
     // check once more
     if (!client.ensure_socket())
         return logger.error("Socket is not active"), BasicSocket::terminate(), 1;
-    // everything goes well
-    client.connect();
 
     // cache
     char* buf = new char[opt_chunk_size];
@@ -390,23 +401,33 @@ int main(int argc, char* argv[]) {
         logger.print("PING ", address, " ", type, " ...");
         int maxtry = 4;
         for (int i = 0; i < maxtry; i++) {
-            time_t start = time(nullptr);
-            err = check_alive(client, buf, opt_chunk_size);
-            time_t end = time(nullptr);
-            std::string ms = std::to_string((end - start) * 1000);
-            if (err == 0) {
+            client.connect();
+            auto start = Timer::point();
+            bool alive = check_alive(client, buf, opt_chunk_size, 1);
+            auto end = Timer::point();
+            std::string ms = std::to_string(Timer::duration(start, end));
+            if (alive) {
                 logger.print("Hello from ", address, " ", type, ": time=", ms, " ms");
             } else {
                 logger.print("Cannot connect to server");
             }
-            if (i + 1 < maxtry) Sleep(1000);
+            if (i + 1 < maxtry) Timer::sleep(1000);
         }
 
         // Clean up
         delete[] buf;
+        client.close();
         client.destroy();
         BasicSocket::terminate();
         return 0;
+    }
+
+    // everything goes well
+    client.connect();
+    if (!check_alive(client, buf, opt_chunk_size, 3)) {
+        return logger.error("Cannot connect to server"), 1;
+    } else {
+        logger.debug("Connceted");
     }
 
     // Interactive
@@ -422,16 +443,10 @@ int main(int argc, char* argv[]) {
             std::string fore_str = join_string(ansi::bright_cyan, "> ", ansi::reset, input);
             std::string fp = input;
 
-            int maxtry = 3;
-            for (int i = 0; i < maxtry; i++) {
-                int err = check_alive(client, buf, opt_chunk_size);
-                if (err == 0) break;
-                client.reconnect();
-                if (i + 1 >= maxtry) {
-                    logger.error("Cannot connect to server");
-                    continue;
-                }
-            };
+            if (!check_alive(client, buf, opt_chunk_size, 3)) {
+                logger.error("Cannot connect to server");
+                continue;
+            }
 
             err = send_file(client, fp, buf, opt_chunk_size);
 
@@ -448,6 +463,7 @@ int main(int argc, char* argv[]) {
 
     // Clean up
     delete[] buf;
+    client.close();
     client.destroy();
     BasicSocket::terminate();
 

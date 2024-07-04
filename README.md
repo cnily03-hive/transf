@@ -10,7 +10,7 @@ The compile environment is MinGW Clang Toolchian, posix thread, C++ 20 standard 
 
 If you meet problems when compiling, give a try to [LLVM MinGW](https://github.com/mstorsjo/llvm-mingw/releases), or refer to [workflow file](./.github/workflows/compile.yml).
 
-The program will save the received file to `./received` by default, you can change the directory by using the `--dir` option.
+The program will save the received file to `received` directory by default, you can change it by specify `--dir` option.
 
 For more information, please refer to the help message via `--help`.
 
@@ -19,13 +19,14 @@ Usage: transf_server [ip] <port> [options]
 
 Options:
   -h, --help               Display this help message
-  --debug                  Enable debug mode
   -d, --dir <path>         Save received files to the specified directory
   --protocol <protocol>    Specify the protocol to use (default: udp)
   --tcp                    Equivalent to --protocol tcp
   --udp                    Equivalent to --protocol udp
   --chunk <size>           Set chunk size for file transfer (default: 2048)
   --timeout <timeout>      Set timeout for sending and receiving data (default: 10000)
+  --debug                  Enable debug mode
+  --listen-all             Listen on all available interfaces
 
 Copyright (c) 2024 Jevon Wang, MIT License
 Source code: github.com/cnily03-hive/transf
@@ -36,13 +37,13 @@ Usage: transf_client <ip> <port> [options]
 
 Options:
   -h, --help               Display this help message
-  --debug                  Enable debug mode
   --ping                   Ping the server
   --protocol <protocol>    Specify the protocol to use (default: udp)
   --tcp                    Equivalent to --protocol tcp
   --udp                    Equivalent to --protocol udp
-  --chunk <size>           Set chunk size for file transfer (default: 2048)
+  --chunk <chunk_size>     Set chunk size for file transfer (default: 2048)
   --timeout <timeout>      Set timeout for sending and receiving data (default: 10000)
+  --debug                  Enable debug mode
 
 Copyright (c) 2024 Jevon Wang, MIT License
 Source code: github.com/cnily03-hive/transf

@@ -33,6 +33,25 @@ class Logger {
         LINE_CRLF,
     };
 
+    /**
+     * Protected functions
+     */
+   protected:
+    Level level;
+    std::string identifier;
+
+    template <typename... Args>
+    void _level_out(std::ostream& os, Level lv, Args... args) const {
+        if (lv < level) return;
+        os << join_string(get_colored_prefix(lv), args...) << std::endl;
+    }
+
+    /**
+     * Constructors
+     */
+   public:
+    Logger(std::string id, Level lv = Level::INFO) : level(lv), identifier(id) {}
+
    protected:
     struct LevelData {
         std::string prefix;
@@ -90,23 +109,30 @@ class Logger {
      */
    public:
     template <typename... Args>
+    void level_print(Level lv, Args... args) const {
+        if (lv < level) return;
+        auto& os = lv == Level::ERROR || lv == Level::WARN ? std::cerr : std::cout;
+        os << join_string(args...) << std::endl;
+    }
+
+    template <typename... Args>
     void info(Args... args) const {
-        return level_print(std::cout, Level::INFO, args...);
+        return _level_out(std::cout, Level::INFO, args...);
     }
 
     template <typename... Args>
     void warn(Args... args) const {
-        return level_print(std::cerr, Level::WARN, args...);
+        return _level_out(std::cerr, Level::WARN, args...);
     }
 
     template <typename... Args>
     void error(Args... args) const {
-        return level_print(std::cerr, Level::ERROR, args...);
+        return _level_out(std::cerr, Level::ERROR, args...);
     }
 
     template <typename... Args>
     void debug(Args... args) const {
-        return level_print(std::cout, Level::DEBUG, args...);
+        return _level_out(std::cout, Level::DEBUG, args...);
     }
 
     template <typename... Args>
@@ -142,23 +168,4 @@ class Logger {
 
     // Flush the output buffer
     void flush() const { std::cout.flush(); }
-
-    /**
-     * Protected functions
-     */
-   protected:
-    Level level;
-    std::string identifier;
-
-    template <typename... Args>
-    void level_print(std::ostream& os, Level lv, Args... args) const {
-        if (lv < level) return;
-        os << join_string(get_colored_prefix(lv), args...) << std::endl;
-    }
-
-    /**
-     * Constructors
-     */
-   public:
-    Logger(std::string id, Level lv = Level::INFO) : level(lv), identifier(id) {}
 };

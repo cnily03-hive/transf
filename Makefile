@@ -34,6 +34,7 @@ SERVER_OBJ = $(BUILD_DIR)/transf_server.o
 # Output executables
 CLIENT_TARGET = transf_client
 SERVER_TARGET = transf_server
+TARGETS = $(CLIENT_TARGET) $(SERVER_TARGET)
 
 # Default Arguments
 HOST = 127.0.0.1
@@ -73,6 +74,6 @@ $(BUILD_DIR):
 
 # Clean generated files
 clean:
-	rm -rf $(BUILD_DIR) $(CLIENT_TARGET) $(SERVER_TARGET)
+	rm -rf $(BUILD_DIR) $(TARGETS)
 
 .PHONY: all clean client server

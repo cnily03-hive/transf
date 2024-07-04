@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <ostream>
+#include <regex>
 #include <sstream>
 
 //===----------------------------------------------------------------------===//
@@ -654,4 +655,11 @@ std::string code_fg(int code) { return stc::stream_to_string(stream::code_fg, co
  */
 std::string code_bg(int code) { return stc::stream_to_string(stream::code_bg, code); }
 
+/**
+ * @brief Removes all ANSI escape codes from the given text.
+ */
+std::string remove_ansi(std::string text) {
+    std::regex ansi_escape_code{"\033\\[[0-9;]*m"};
+    return std::regex_replace(text, ansi_escape_code, "");
+}
 }  // namespace ansi

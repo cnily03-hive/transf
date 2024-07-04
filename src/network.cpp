@@ -189,6 +189,7 @@ int BasicSocket::close() const {
 int BasicSocket::destroy() const {
     int err = ::closesocket(m_sockfd);
     m_sockfd = INVALID_SOCKET;
+    m_prop_hasbound = false;
     return err;
 }
 
@@ -324,7 +325,7 @@ SocketPeer::SocketPeer(BasicSocket* p_bsocket_from, addrcoll* paddr_peer, SOCKET
     m_prop_hasbound = is_peer_bound(s_peer);
 }
 
-bool SocketPeer::ensure_addr() const {
+bool SocketPeer::ensure() const {
     return ::BasicSocket::ensure_socket() && m_p_bsock_from->ensure_addr();
 }
 
@@ -349,7 +350,7 @@ int SocketPeer::recv(char* buf, int maxlen) const {
     bool is_both_stream = m_addrcoll.ai_socktype == SOCK_STREAM &&
                           m_p_bsock_from->addr_info().ai_socktype == SOCK_STREAM;
     if (is_both_stream) {
-        if (!ensure_socket() || !ensure_addr()) return SOCKET_NOT_PREPARED;
+        if (!ensure()) return SOCKET_NOT_PREPARED;
         int size = ::recv(m_sockfd, buf, maxlen, 0);
         return size;
     } else {
@@ -375,18 +376,35 @@ int SocketPeer::onclose(const PeerCloseHandler& pHandler) const {
     return 0;
 }
 
-int SocketPeer::close() const {
-    if (!ensure()) return 0;
-    for (auto pHandler : m_pCloseHandlers) {
-        pHandler(*this);
+int SocketPeer::end() const {
+    if (!ensure_addr()) return ADDR_NOT_INIT;
+    bool is_stream = m_addrcoll.ai_socktype == SOCK_STREAM;
+    if (is_stream) {
+        if (!ensure_socket()) return SOCKET_NOT_PREPARED;
+        int err = ::shutdown(m_sockfd, SD_BOTH);
+        m_prop_hasbound = is_sock_bound(m_sockfd);
+        return err;
+    } else {
+        return METHOD_NOT_IMPLEMENTED;
     }
-    int err = ::closesocket(m_sockfd);
-    m_prop_hasbound = is_peer_bound(m_sockfd);
+}
+
+int SocketPeer::close() const {
+    if (!ensure_addr()) return ADDR_NOT_INIT;
+    bool is_stream = m_addrcoll.ai_socktype == SOCK_STREAM;
+    int err = METHOD_NOT_IMPLEMENTED;
+    if (is_stream) {
+        if (!ensure()) return 0;
+        for (auto pHandler : m_pCloseHandlers) {
+            err = pHandler(*this);
+        }
+    }
+    err = ::BasicSocket::close();
     return err;
 }
 
 //===--------------------------------------------------===//
-// SocketPeer
+// SocketClient
 //===--------------------------------------------------===//
 
 SocketClient::SocketClient(const SocketClient& r) noexcept
@@ -401,8 +419,17 @@ SocketClient::SocketClient(BasicSocket&& bs) noexcept : BasicSocket(std::move(bs
 }
 
 SocketClient::~SocketClient() {
-    destroy();
-    delete &m_saddrcoll;  // TODO: or FreeAddrInfo ?
+    // TODO: release m_saddrcoll, FreeAddrInfo may not work
+    delete m_saddrcoll.ai_addr;
+    delete m_saddrcoll.ai_canonname;
+}
+
+bool SocketClient::ensure_addr() const {
+    if (m_saddrcoll.ai_socktype == SOCK_STREAM) {
+        return ::BasicSocket::ensure_addr() && m_saddrcoll.ai_addr != nullptr;
+    } else {
+        return ::BasicSocket::ensure_addr();
+    }
 }
 
 int SocketClient::send(const char* buf, int totlen) const {
@@ -433,6 +460,19 @@ int SocketClient::recv(char* buf, int maxlen) const {
         int size = ::recvfrom(m_sockfd, buf, maxlen, 0, m_saddrcoll.ai_addr,
                               (socklen_t*)&m_saddrcoll.ai_addrlen);
         return size;
+    }
+}
+
+int SocketClient::end() const {
+    if (!ensure_addr()) return ADDR_NOT_INIT;
+    bool is_stream = m_saddrcoll.ai_socktype == SOCK_STREAM;
+    if (is_stream) {
+        if (!ensure_socket()) return SOCKET_NOT_PREPARED;
+        int err = ::shutdown(m_sockfd, SD_BOTH);
+        m_prop_hasbound = is_sock_bound(m_sockfd);
+        return err;
+    } else {
+        return METHOD_NOT_IMPLEMENTED;
     }
 }
 
@@ -489,7 +529,7 @@ SocketServer::SocketServer(BasicSocket&& r, int max_clients) noexcept
     : BasicSocket(std::move(r)), m_max_clients(max_clients) {}
 
 SocketServer::~SocketServer() {
-    close();
+    m_serving = false;
     wait();
 }
 
@@ -568,6 +608,7 @@ int SocketServer::message_stream_thread(int buf_size, const SocketPeer& peer) {
         memcpy(buf, buf_cache, size);
         err = message_thread(buf, size, peer);
     }
+    // after the process, close the peer
     peer.close();
     return err;
 }
@@ -686,21 +727,53 @@ int SocketServer::onclose(const ServerCloseHandler& pHandler) const {
 }
 
 int SocketServer::close() const {
-    UniqueLock lock(m_mutex);
-
-    if (!m_serving) return 0;  // not serving, no need to close
-    lock.unlock();
+    if (!ensure_addr()) return ADDR_NOT_INIT;
+    bool is_stream = m_addrcoll.ai_socktype == SOCK_STREAM;
+    if (!is_stream) return 0;
+    int err = METHOD_NOT_IMPLEMENTED;
 
     // closing
-    // emit all close handlers
-    for (auto pHandler : m_pCloseHandlers) {
-        pHandler(*this);
+    bool valid = (is_stream && ensure()) || (!is_stream && ensure_socket());
+
+    if (valid) {
+        // emit all close handlers
+        for (auto pHandler : m_pCloseHandlers) {
+            err = pHandler(*this);
+        }
+        // close the socket
+        // TODO: add status (CONNECTING, CLOSING, CLOSED, etc.)
+        err = ::BasicSocket::close();
+    } else {
+        err = SOCKET_NOT_PREPARED;
     }
 
-    // cancel serving
+    // closed, cancel serving
+    UniqueLock lock(m_mutex);
     m_serving = false;  // TODO: use StreamStatus
-    // close the socket
-    return ::BasicSocket::close();
+    lock.unlock();
+
+    return err;
+}
+
+int SocketServer::end() const {
+    if (!ensure_addr()) return ADDR_NOT_INIT;
+    bool is_stream = m_addrcoll.ai_socktype == SOCK_STREAM;
+    if (is_stream) {
+        // TODO: add StreamStatus and capture end event
+        if (!ensure_socket()) return SOCKET_NOT_PREPARED;
+        int err = ::shutdown(m_sockfd, SD_BOTH);
+        m_prop_hasbound = is_sock_bound(m_sockfd);
+        return err;
+    } else {
+        return METHOD_NOT_IMPLEMENTED;
+    }
+}
+
+int SocketServer::destroy() const {
+    UniqueLock lock(m_mutex);
+    m_serving = false;
+    lock.unlock();
+    return BasicSocket::destroy();
 }
 
 int SocketServer::wait() const {
