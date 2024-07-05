@@ -395,7 +395,7 @@ int main(int argc, char* argv[]) {
             }
             options.save_path = std::string(next);
             try {
-                auto t = std::filesystem::canonical(options.save_path).string();
+                auto t = std::filesystem::weakly_canonical(options.save_path).string();
             } catch (...) {
                 return logger.error("Invalid path: ", options.save_path), 1;
             }
@@ -513,7 +513,7 @@ int main(int argc, char* argv[]) {
         return logger.error("Undefined save path, use --dir to specify."), 1;
     }
     try {
-        opt_abs_save_path = std::filesystem::canonical(options.save_path).string();
+        opt_abs_save_path = std::filesystem::weakly_canonical(options.save_path).string();
     } catch (...) {
         logger.error("An error occurred while parsing the save path: ", options.save_path);
         return 1;
